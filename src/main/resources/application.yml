@@ -2,6 +2,16 @@ spring:
   application:
     name: docmind-ai
 
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/docmind}
+    username: ${DB_USERNAME:docmind}
+    password: ${DB_PASSWORD:docmind}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
 management:
   endpoints:
     web:
