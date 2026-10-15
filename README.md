@@ -3,8 +3,6 @@
 Document Q&A service built with Spring Boot. Upload PDF or text files and ask questions about
 them; answers come with references to the source passages.
 
-> Work in progress. The project is being built step by step.
-
 ## Tech stack
 
 - Java 21, Spring Boot 3.5
