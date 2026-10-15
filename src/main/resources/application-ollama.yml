@@ -1,0 +1,20 @@
+spring:
+  ai:
+    model:
+      chat: ollama
+      embedding: ollama
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      init:
+        pull-model-strategy: when_missing
+      chat:
+        options:
+          model: ${OLLAMA_CHAT_MODEL:llama3.2}
+          temperature: 0.1
+      embedding:
+        options:
+          model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
+    vectorstore:
+      pgvector:
+        # nomic-embed-text produces 768-dimensional vectors
+        dimensions: 768

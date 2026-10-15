@@ -1,3 +1,9 @@
+spring:
+  ai:
+    vectorstore:
+      pgvector:
+        dimensions: 384
+
 logging:
   level:
     org.testcontainers: WARN

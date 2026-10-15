@@ -1,6 +1,8 @@
 spring:
   application:
     name: docmind-ai
+  profiles:
+    default: ollama
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/docmind}
@@ -11,6 +13,27 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+
+  flyway:
+    placeholders:
+      embedding_dimensions: ${spring.ai.vectorstore.pgvector.dimensions}
+
+  ai:
+    # Only chat and embedding models are used. The provider profiles switch these on.
+    model:
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+        index-type: hnsw
+        distance-type: cosine_distance
+        dimensions: 768
 
 management:
   endpoints:
