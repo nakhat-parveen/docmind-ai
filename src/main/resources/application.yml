@@ -18,6 +18,16 @@ spring:
     placeholders:
       embedding_dimensions: ${spring.ai.vectorstore.pgvector.dimensions}
 
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+  data:
+    web:
+      pageable:
+        max-page-size: 100
+
   ai:
     # Only chat and embedding models are used. The provider profiles switch these on.
     model:
