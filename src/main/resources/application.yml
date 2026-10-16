@@ -35,6 +35,11 @@ spring:
         distance-type: cosine_distance
         dimensions: 768
 
+docmind:
+  ingestion:
+    chunk-size: 400
+    min-chunk-size-chars: 200
+
 management:
   endpoints:
     web:

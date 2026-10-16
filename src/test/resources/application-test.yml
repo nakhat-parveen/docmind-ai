@@ -4,6 +4,11 @@ spring:
       pgvector:
         dimensions: 384
 
+docmind:
+  ingestion:
+    chunk-size: 60
+    min-chunk-size-chars: 50
+
 logging:
   level:
     org.testcontainers: WARN
