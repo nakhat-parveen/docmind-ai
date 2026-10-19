@@ -49,6 +49,9 @@ docmind:
   ingestion:
     chunk-size: 400
     min-chunk-size-chars: 200
+  retrieval:
+    default-top-k: 5
+    similarity-threshold: 0.3
 
 management:
   endpoints:

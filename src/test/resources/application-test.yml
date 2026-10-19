@@ -8,6 +8,8 @@ docmind:
   ingestion:
     chunk-size: 60
     min-chunk-size-chars: 50
+  retrieval:
+    similarity-threshold: 0.05
 
 logging:
   level:
