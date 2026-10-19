@@ -97,6 +97,48 @@ class DocumentApiIntegrationTest {
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM vector_store", Integer.class)).isZero();
     }
 
+    @Test
+    void returnsNotFoundForUnknownDocument() throws Exception {
+        mockMvc.perform(get("/api/documents/{id}", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.title").value("Document not found"));
+    }
+
+    @Test
+    void rejectsDuplicateUpload() throws Exception {
+        UUID id = upload("dup.txt", "Same content twice.");
+
+        mockMvc.perform(multipart("/api/documents").file(textFile("copy.txt", "Same content twice.")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.existingDocumentId").value(id.toString()));
+    }
+
+    @Test
+    void rejectsUnsupportedFileType() throws Exception {
+        var image = new MockMultipartFile("file", "photo.png", "image/png", new byte[]{1, 2, 3});
+
+        mockMvc.perform(multipart("/api/documents").file(image))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.detail").value(containsString("photo.png")));
+    }
+
+    @Test
+    void marksUnreadableDocumentAsFailed() throws Exception {
+        var broken = new MockMultipartFile("file", "broken.pdf", "application/pdf",
+                "not really a pdf".getBytes(StandardCharsets.UTF_8));
+
+        mockMvc.perform(multipart("/api/documents").file(broken))
+                .andExpect(status().isUnprocessableEntity());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM documents", String.class)).isEqualTo("FAILED");
+    }
+
+    @Test
+    void rejectsRequestWithoutFile() throws Exception {
+        mockMvc.perform(multipart("/api/documents"))
+                .andExpect(status().isBadRequest());
+    }
+
     private UUID upload(String filename, String content) throws Exception {
         String body = mockMvc.perform(multipart("/api/documents").file(textFile(filename, content)))
                 .andExpect(status().isCreated())
