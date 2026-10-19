@@ -10,4 +10,9 @@ public class TestAiConfiguration {
     FakeEmbeddingModel embeddingModel() {
         return new FakeEmbeddingModel();
     }
+
+    @Bean
+    FakeChatModel chatModel() {
+        return new FakeChatModel();
+    }
 }
