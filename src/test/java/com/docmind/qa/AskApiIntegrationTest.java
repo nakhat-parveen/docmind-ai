@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static com.docmind.support.ApiKey.apiKey;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
@@ -50,7 +51,7 @@ class AskApiIntegrationTest {
     void answersWithCitations() throws Exception {
         chatModel.reply("You get 1000 euros per year for training [1].");
 
-        mockMvc.perform(post("/api/ask")
+        mockMvc.perform(post("/api/ask").with(apiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"question": "How much budget do employees get for training courses?"}
@@ -70,7 +71,7 @@ class AskApiIntegrationTest {
 
     @Test
     void doesNotCallTheModelWithoutMatchingChunks() throws Exception {
-        mockMvc.perform(post("/api/ask")
+        mockMvc.perform(post("/api/ask").with(apiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"question": "Quantum chromodynamics gluon confinement?"}
@@ -84,7 +85,7 @@ class AskApiIntegrationTest {
 
     @Test
     void rejectsBlankQuestion() throws Exception {
-        mockMvc.perform(post("/api/ask")
+        mockMvc.perform(post("/api/ask").with(apiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"question": ""}

@@ -52,6 +52,9 @@ docmind:
   retrieval:
     default-top-k: 5
     similarity-threshold: 0.3
+  security:
+    header-name: X-API-Key
+    api-keys: ${DOCMIND_API_KEYS:local-dev-key}
 
 management:
   endpoints:

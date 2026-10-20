@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static com.docmind.support.ApiKey.apiKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -44,7 +45,7 @@ class SearchApiIntegrationTest {
 
     @Test
     void returnsMostSimilarChunkFirst() throws Exception {
-        mockMvc.perform(post("/api/search")
+        mockMvc.perform(post("/api/search").with(apiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"query": "Are train tickets for business travel reimbursed?"}
@@ -58,7 +59,7 @@ class SearchApiIntegrationTest {
 
     @Test
     void restrictsSearchToGivenDocuments() throws Exception {
-        mockMvc.perform(post("/api/search")
+        mockMvc.perform(post("/api/search").with(apiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"query": "laptops encrypted passwords train tickets", "documentIds": ["%s"]}
@@ -70,7 +71,7 @@ class SearchApiIntegrationTest {
 
     @Test
     void validatesRequest() throws Exception {
-        mockMvc.perform(post("/api/search")
+        mockMvc.perform(post("/api/search").with(apiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"query": " ", "topK": 50}
@@ -83,7 +84,7 @@ class SearchApiIntegrationTest {
 
     @Test
     void rejectsMalformedJson() throws Exception {
-        mockMvc.perform(post("/api/search")
+        mockMvc.perform(post("/api/search").with(apiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{not json"))
                 .andExpect(status().isBadRequest());
