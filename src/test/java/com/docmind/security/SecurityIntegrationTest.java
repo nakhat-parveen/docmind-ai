@@ -45,4 +45,9 @@ class SecurityIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    void protectsMcpEndpoint() throws Exception {
+        mockMvc.perform(get("/mcp"))
+                .andExpect(status().isUnauthorized());
+    }
 }

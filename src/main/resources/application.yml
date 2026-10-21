@@ -44,6 +44,15 @@ spring:
         index-type: hnsw
         distance-type: cosine_distance
         dimensions: 768
+    mcp:
+      server:
+        name: docmind
+        version: 0.1.0
+        type: sync
+        protocol: streamable
+        instructions: Search and ask questions about documents stored in DocMind.
+        annotation-scanner:
+          enabled: false
 
 docmind:
   ingestion:
