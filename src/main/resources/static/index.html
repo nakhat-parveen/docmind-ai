@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DocMind AI</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <img src="favicon.svg" alt="" width="28" height="28">
+        <span>DocMind <strong>AI</strong></span>
+    </div>
+    <form id="key-form" class="key-form" autocomplete="off">
+        <label for="api-key">API key</label>
+        <input id="api-key" type="password" placeholder="X-API-Key" required>
+        <button type="submit" class="btn btn-ghost">Save</button>
+    </form>
+</header>
+
+<main class="layout">
+    <section class="panel">
+        <h2>Documents</h2>
+        <form id="upload-form" class="dropzone" aria-label="Upload document">
+            <input id="file-input" type="file" accept=".pdf,.txt,application/pdf,text/plain" hidden>
+            <p><strong>Drop a PDF or TXT file here</strong> or <button type="button" id="browse" class="link">browse</button></p>
+            <p class="hint">Max. 20 MB. Files are chunked and embedded right away.</p>
+        </form>
+        <ul id="document-list" class="documents"></ul>
+        <p id="documents-empty" class="empty">No documents yet.</p>
+    </section>
+
+    <section class="panel panel-wide">
+        <h2>Ask your documents</h2>
+        <form id="ask-form" class="ask-form">
+            <textarea id="question" rows="3" maxlength="2000"
+                      placeholder="e.g. How many vacation days do new employees get?" required></textarea>
+            <div class="ask-actions">
+                <label class="scope"><input type="checkbox" id="only-selected"> only selected documents</label>
+                <button type="submit" class="btn btn-primary" id="ask-button">Ask</button>
+            </div>
+        </form>
+        <article id="answer" class="answer" hidden>
+            <div id="answer-text" class="answer-text"></div>
+            <h3>Sources</h3>
+            <ol id="citations" class="citations"></ol>
+        </article>
+    </section>
+</main>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="js/app.js"></script>
+</body>
+</html>
