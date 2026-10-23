@@ -14,12 +14,13 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.UUID;
 
 import static com.docmind.support.ApiKey.apiKey;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.greaterThan;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -45,25 +46,21 @@ class DocumentApiIntegrationTest {
     }
 
     @Test
-    void uploadsTextFile() throws Exception {
+    void acceptsUploadAndProcessesItInTheBackground() throws Exception {
         var file = textFile("policy.txt", "Employees get 30 days of paid vacation per year. ".repeat(20));
 
-        mockMvc.perform(multipart("/api/documents").file(file).with(apiKey()))
-                .andExpect(status().isCreated())
+        String body = mockMvc.perform(multipart("/api/documents").file(file).with(apiKey()))
+                .andExpect(status().isAccepted())
                 .andExpect(header().string("Location", containsString("/api/documents/")))
                 .andExpect(jsonPath("$.filename").value("policy.txt"))
                 .andExpect(jsonPath("$.contentType").value("text/plain"))
-                .andExpect(jsonPath("$.status").value("READY"))
-                .andExpect(jsonPath("$.chunkCount").value(greaterThan(0)));
-    }
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.chunkCount").value(0))
+                .andReturn().getResponse().getContentAsString();
+        UUID id = UUID.fromString(objectMapper.readTree(body).get("id").asText());
 
-    @Test
-    void keepsTheOriginalFileContent() throws Exception {
-        UUID id = upload("notes.txt", "Meeting notes from Monday.");
-
-        byte[] stored = jdbcTemplate.queryForObject(
-                "SELECT data FROM document_contents WHERE document_id = ?", byte[].class, id);
-        assertThat(new String(stored, StandardCharsets.UTF_8)).isEqualTo("Meeting notes from Monday.");
+        JsonNode processed = awaitStatus(id, "READY");
+        assertThat(processed.get("chunkCount").asInt()).isPositive();
     }
 
     @Test
@@ -71,19 +68,28 @@ class DocumentApiIntegrationTest {
         var pdf = new MockMultipartFile("file", "handbook.pdf", "application/pdf",
                 TestPdfs.withPages("Welcome to the company.", "Parking is free for all employees."));
 
-        mockMvc.perform(multipart("/api/documents").file(pdf).with(apiKey()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("READY"))
-                .andExpect(jsonPath("$.chunkCount").value(2));
+        UUID id = upload(pdf);
 
-        assertThat(jdbcTemplate.queryForList("SELECT metadata ->> 'page' FROM vector_store ORDER BY 1", String.class))
+        assertThat(awaitStatus(id, "READY").get("chunkCount").asInt()).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT metadata ->> 'page' FROM vector_store WHERE metadata ->> 'document_id' = ? ORDER BY 1",
+                String.class, id.toString()))
                 .containsExactly("1", "2");
     }
 
     @Test
+    void keepsTheOriginalFileContent() throws Exception {
+        UUID id = upload(textFile("notes.txt", "Meeting notes from Monday."));
+
+        byte[] stored = jdbcTemplate.queryForObject(
+                "SELECT data FROM document_contents WHERE document_id = ?", byte[].class, id);
+        assertThat(new String(stored, StandardCharsets.UTF_8)).isEqualTo("Meeting notes from Monday.");
+    }
+
+    @Test
     void listsAndFetchesDocuments() throws Exception {
-        UUID id = upload("first.txt", "First document content about invoices.");
-        upload("second.txt", "Second document content about travel expenses.");
+        UUID id = upload(textFile("first.txt", "First document content about invoices."));
+        upload(textFile("second.txt", "Second document content about travel expenses."));
 
         mockMvc.perform(get("/api/documents").with(apiKey()))
                 .andExpect(status().isOk())
@@ -98,7 +104,8 @@ class DocumentApiIntegrationTest {
 
     @Test
     void deletesDocumentTogetherWithItsChunks() throws Exception {
-        UUID id = upload("temp.txt", "Temporary content that will be removed again.");
+        UUID id = upload(textFile("temp.txt", "Temporary content that will be removed again."));
+        awaitStatus(id, "READY");
 
         mockMvc.perform(delete("/api/documents/{id}", id).with(apiKey()))
                 .andExpect(status().isNoContent());
@@ -117,7 +124,7 @@ class DocumentApiIntegrationTest {
 
     @Test
     void rejectsDuplicateUpload() throws Exception {
-        UUID id = upload("dup.txt", "Same content twice.");
+        UUID id = upload(textFile("dup.txt", "Same content twice."));
 
         mockMvc.perform(multipart("/api/documents").file(textFile("copy.txt", "Same content twice.")).with(apiKey()))
                 .andExpect(status().isConflict())
@@ -134,14 +141,34 @@ class DocumentApiIntegrationTest {
     }
 
     @Test
+    void rejectsEmptyFile() throws Exception {
+        mockMvc.perform(multipart("/api/documents").file(textFile("empty.txt", "")).with(apiKey()))
+                .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
     void marksUnreadableDocumentAsFailed() throws Exception {
         var broken = new MockMultipartFile("file", "broken.pdf", "application/pdf",
                 "not really a pdf".getBytes(StandardCharsets.UTF_8));
 
-        mockMvc.perform(multipart("/api/documents").file(broken).with(apiKey()))
-                .andExpect(status().isUnprocessableEntity());
+        UUID id = upload(broken);
 
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM documents", String.class)).isEqualTo("FAILED");
+        JsonNode failed = awaitStatus(id, "FAILED");
+        assertThat(failed.get("errorMessage").asText()).isNotBlank();
+    }
+
+    @Test
+    void allowsUploadingAFailedDocumentAgain() throws Exception {
+        var broken = new MockMultipartFile("file", "broken.pdf", "application/pdf",
+                "not really a pdf".getBytes(StandardCharsets.UTF_8));
+        UUID first = upload(broken);
+        awaitStatus(first, "FAILED");
+
+        UUID second = upload(broken);
+
+        assertThat(second).isNotEqualTo(first);
+        mockMvc.perform(get("/api/documents/{id}", first).with(apiKey()))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -150,12 +177,22 @@ class DocumentApiIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
-    private UUID upload(String filename, String content) throws Exception {
-        String body = mockMvc.perform(multipart("/api/documents").file(textFile(filename, content)).with(apiKey()))
-                .andExpect(status().isCreated())
+    private UUID upload(MockMultipartFile file) throws Exception {
+        String body = mockMvc.perform(multipart("/api/documents").file(file).with(apiKey()))
+                .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
-        JsonNode json = objectMapper.readTree(body);
-        return UUID.fromString(json.get("id").asText());
+        return UUID.fromString(objectMapper.readTree(body).get("id").asText());
+    }
+
+    private JsonNode awaitStatus(UUID id, String expected) {
+        return await().atMost(Duration.ofSeconds(20)).until(() -> fetch(id),
+                json -> json != null && expected.equals(json.get("status").asText()));
+    }
+
+    private JsonNode fetch(UUID id) throws Exception {
+        String body = mockMvc.perform(get("/api/documents/{id}", id).with(apiKey()))
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(body);
     }
 
     private static MockMultipartFile textFile(String filename, String content) {

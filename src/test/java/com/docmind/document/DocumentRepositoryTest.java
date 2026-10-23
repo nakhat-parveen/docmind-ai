@@ -30,7 +30,7 @@ class DocumentRepositoryTest {
 
         assertThat(found).hasValueSatisfying(d -> {
             assertThat(d.getFilename()).isEqualTo("handbook.pdf");
-            assertThat(d.getStatus()).isEqualTo(DocumentStatus.PROCESSING);
+            assertThat(d.getStatus()).isEqualTo(DocumentStatus.PENDING);
             assertThat(d.getCreatedAt()).isNotNull();
         });
     }

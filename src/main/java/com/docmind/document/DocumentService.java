@@ -3,12 +3,14 @@ package com.docmind.document;
 import com.docmind.ingestion.DocumentProcessingException;
 import com.docmind.ingestion.DocumentType;
 import com.docmind.ingestion.IngestionService;
+import com.docmind.processing.DocumentEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.security.MessageDigest;
@@ -24,18 +26,25 @@ public class DocumentService {
     private final DocumentRepository repository;
     private final DocumentContentRepository contentRepository;
     private final IngestionService ingestionService;
+    private final DocumentEventPublisher eventPublisher;
+    private final TransactionTemplate transactionTemplate;
 
     public DocumentService(DocumentRepository repository,
                            DocumentContentRepository contentRepository,
-                           IngestionService ingestionService) {
+                           IngestionService ingestionService,
+                           DocumentEventPublisher eventPublisher,
+                           TransactionTemplate transactionTemplate) {
         this.repository = repository;
         this.contentRepository = contentRepository;
         this.ingestionService = ingestionService;
+        this.eventPublisher = eventPublisher;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /**
-     * Stores the document metadata and ingests its content. Embedding can take a while,
-     * so it deliberately runs outside of a database transaction.
+     * Validates and stores the upload, then hands it over to background processing.
+     * The event is published only after the transaction committed, so the consumer
+     * always finds the document in the database.
      */
     public StoredDocument upload(String originalFilename, String contentType, byte[] content) {
         if (content.length == 0) {
@@ -47,30 +56,24 @@ public class DocumentService {
         DocumentType type = DocumentType.detect(filename, contentType);
         String checksum = sha256(content);
 
-        repository.findByChecksum(checksum).ifPresent(existing -> {
-            if (existing.getStatus() != DocumentStatus.FAILED) {
-                throw new DuplicateDocumentException(existing.getId());
-            }
-            // a previous attempt failed, so allow the file to be uploaded again
-            repository.delete(existing);
+        StoredDocument document = transactionTemplate.execute(status -> {
+            repository.findByChecksum(checksum).ifPresent(existing -> {
+                if (existing.getStatus() != DocumentStatus.FAILED) {
+                    throw new DuplicateDocumentException(existing.getId());
+                }
+                // a previous attempt failed, so allow the file to be uploaded again
+                repository.delete(existing);
+                repository.flush();
+            });
+            StoredDocument saved = repository.save(
+                    new StoredDocument(filename, type.mediaType(), content.length, checksum));
+            contentRepository.save(new DocumentContent(saved.getId(), content));
+            return saved;
         });
 
-        StoredDocument document = repository.save(
-                new StoredDocument(filename, type.mediaType(), content.length, checksum));
-        contentRepository.save(new DocumentContent(document.getId(), content));
-        try {
-            int chunks = ingestionService.ingest(document.getId(), filename, type, content);
-            document.markReady(chunks);
-            return repository.save(document);
-        } catch (RuntimeException e) {
-            log.warn("Ingestion of document {} failed", document.getId(), e);
-            document.markFailed(e.getMessage());
-            repository.save(document);
-            if (e instanceof DocumentProcessingException processingException) {
-                throw processingException;
-            }
-            throw new DocumentProcessingException("Failed to process '%s'".formatted(filename), e);
-        }
+        eventPublisher.documentUploaded(document.getId());
+        log.info("Accepted document {} ({}) for processing", document.getId(), filename);
+        return document;
     }
 
     @Transactional(readOnly = true)

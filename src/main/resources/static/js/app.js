@@ -109,7 +109,7 @@
         showToast(`Uploading ${file.name}…`);
         try {
             const doc = await api('/api/documents', {method: 'POST', body: form});
-            showToast(`${doc.filename} indexed into ${doc.chunkCount} chunks`);
+            showToast(`${doc.filename} uploaded, indexing started`);
         } catch (e) {
             showToast(e.message, true);
         }

@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -49,6 +50,13 @@ public class StoredDocument {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /**
+     * Upload, background processing and delete can touch the same row at the same
+     * time. The version makes a stale write fail instead of silently winning.
+     */
+    @Version
+    private Long version;
+
     protected StoredDocument() {
     }
 
@@ -58,7 +66,12 @@ public class StoredDocument {
         this.contentType = contentType;
         this.sizeBytes = sizeBytes;
         this.checksum = checksum;
+        this.status = DocumentStatus.PENDING;
+    }
+
+    public void markProcessing() {
         this.status = DocumentStatus.PROCESSING;
+        this.errorMessage = null;
     }
 
     public void markReady(int chunkCount) {

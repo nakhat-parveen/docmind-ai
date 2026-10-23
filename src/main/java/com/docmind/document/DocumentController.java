@@ -32,7 +32,7 @@ public class DocumentController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Upload a PDF or TXT file and index it for search")
+    @Operation(summary = "Upload a PDF or TXT file. It is indexed in the background; poll the document for its status")
     public ResponseEntity<DocumentResponse> upload(@RequestPart("file") MultipartFile file) throws IOException {
         StoredDocument document = documentService.upload(
                 file.getOriginalFilename(), file.getContentType(), file.getBytes());
@@ -40,7 +40,7 @@ public class DocumentController {
                 .path("/{id}")
                 .buildAndExpand(document.getId())
                 .toUri();
-        return ResponseEntity.created(location).body(DocumentResponse.from(document));
+        return ResponseEntity.accepted().location(location).body(DocumentResponse.from(document));
     }
 
     @GetMapping

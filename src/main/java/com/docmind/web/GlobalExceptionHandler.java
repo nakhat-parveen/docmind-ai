@@ -7,6 +7,7 @@ import com.docmind.ingestion.UnsupportedDocumentTypeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -47,6 +48,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     ProblemDetail handleConstraintViolation(DataIntegrityViolationException ex) {
         log.debug("Constraint violation", ex);
         return problem(HttpStatus.CONFLICT, "Conflict", "The request conflicts with existing data");
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ProblemDetail handleConcurrentUpdate(OptimisticLockingFailureException ex) {
+        log.debug("Concurrent update", ex);
+        return problem(HttpStatus.CONFLICT, "Conflict", "The document is being updated right now, please try again");
     }
 
     @ExceptionHandler(UnsupportedDocumentTypeException.class)
