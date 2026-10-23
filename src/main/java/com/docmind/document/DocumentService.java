@@ -22,10 +22,14 @@ public class DocumentService {
     private static final Logger log = LoggerFactory.getLogger(DocumentService.class);
 
     private final DocumentRepository repository;
+    private final DocumentContentRepository contentRepository;
     private final IngestionService ingestionService;
 
-    public DocumentService(DocumentRepository repository, IngestionService ingestionService) {
+    public DocumentService(DocumentRepository repository,
+                           DocumentContentRepository contentRepository,
+                           IngestionService ingestionService) {
         this.repository = repository;
+        this.contentRepository = contentRepository;
         this.ingestionService = ingestionService;
     }
 
@@ -53,6 +57,7 @@ public class DocumentService {
 
         StoredDocument document = repository.save(
                 new StoredDocument(filename, type.mediaType(), content.length, checksum));
+        contentRepository.save(new DocumentContent(document.getId(), content));
         try {
             int chunks = ingestionService.ingest(document.getId(), filename, type, content);
             document.markReady(chunks);

@@ -8,6 +8,6 @@ public final class DatabaseCleaner {
     }
 
     public static void clean(JdbcTemplate jdbcTemplate) {
-        jdbcTemplate.execute("TRUNCATE TABLE vector_store, documents");
+        jdbcTemplate.execute("TRUNCATE TABLE vector_store, document_contents, documents");
     }
 }

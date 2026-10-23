@@ -58,6 +58,15 @@ class DocumentApiIntegrationTest {
     }
 
     @Test
+    void keepsTheOriginalFileContent() throws Exception {
+        UUID id = upload("notes.txt", "Meeting notes from Monday.");
+
+        byte[] stored = jdbcTemplate.queryForObject(
+                "SELECT data FROM document_contents WHERE document_id = ?", byte[].class, id);
+        assertThat(new String(stored, StandardCharsets.UTF_8)).isEqualTo("Meeting notes from Monday.");
+    }
+
+    @Test
     void uploadsPdfAndKeepsPageNumbers() throws Exception {
         var pdf = new MockMultipartFile("file", "handbook.pdf", "application/pdf",
                 TestPdfs.withPages("Welcome to the company.", "Parking is free for all employees."));
@@ -95,6 +104,7 @@ class DocumentApiIntegrationTest {
                 .andExpect(status().isNoContent());
 
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM documents", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM document_contents", Integer.class)).isZero();
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM vector_store", Integer.class)).isZero();
     }
 
