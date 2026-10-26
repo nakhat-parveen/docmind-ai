@@ -90,14 +90,37 @@
         }
     }
 
+    const IN_PROGRESS = ['PENDING', 'PROCESSING'];
+    const POLL_INTERVAL_MS = 2000;
+    let lastStatus = new Map();
+    let pollTimer = null;
+
+    function announceFinished(documents) {
+        for (const doc of documents) {
+            if (!IN_PROGRESS.includes(lastStatus.get(doc.id))) continue;
+            if (doc.status === 'READY') {
+                showToast(`${doc.filename} is ready (${doc.chunkCount} chunks)`);
+            } else if (doc.status === 'FAILED') {
+                showToast(`${doc.filename} could not be processed: ${doc.errorMessage || 'unknown error'}`, true);
+            }
+        }
+        lastStatus = new Map(documents.map((doc) => [doc.id, doc.status]));
+    }
+
     async function loadDocuments() {
+        clearTimeout(pollTimer);
         if (!els.keyInput.value) {
             renderDocuments([]);
             return;
         }
         try {
             const page = await api('/api/documents?size=100');
+            announceFinished(page.content);
             renderDocuments(page.content);
+            // documents are indexed in the background, so keep refreshing until all of them are done
+            if (page.content.some((doc) => IN_PROGRESS.includes(doc.status))) {
+                pollTimer = setTimeout(loadDocuments, POLL_INTERVAL_MS);
+            }
         } catch (e) {
             showToast(`Could not load documents: ${e.message}`, true);
         }
@@ -109,7 +132,7 @@
         showToast(`Uploading ${file.name}…`);
         try {
             const doc = await api('/api/documents', {method: 'POST', body: form});
-            showToast(`${doc.filename} uploaded, indexing started`);
+            showToast(`${doc.filename} uploaded, indexing in the background…`);
         } catch (e) {
             showToast(e.message, true);
         }

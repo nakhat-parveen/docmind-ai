@@ -167,6 +167,7 @@ input:focus, textarea:focus {
     margin-left: 0.4rem;
 }
 
+.badge-PENDING { background: #e0e7ff; color: #3730a3; }
 .badge-READY { background: #dcfce7; color: var(--ok); }
 .badge-PROCESSING { background: #fef3c7; color: var(--warn); }
 .badge-FAILED { background: #fee2e2; color: var(--danger); }
