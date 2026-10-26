@@ -18,3 +18,10 @@ docmind:
 logging:
   level:
     org.testcontainers: WARN
+
+# Spring Boot switches metric exporters off in tests; the Prometheus endpoint is tested on purpose
+management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true

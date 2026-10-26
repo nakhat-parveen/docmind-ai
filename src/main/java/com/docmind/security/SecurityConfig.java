@@ -35,6 +35,8 @@ public class SecurityConfig {
                         .requestMatchers("/", "/index.html", "/css/**", "/js/**", "/favicon.svg").permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/actuator/health/**", "/error").permitAll()
+                        // scraped by Prometheus; metrics hold no document data, but keep this port internal in production
+                        .requestMatchers("/actuator/prometheus").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(new ApiKeyAuthenticationFilter(apiKeyProperties), AnonymousAuthenticationFilter.class)
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(entryPoint))

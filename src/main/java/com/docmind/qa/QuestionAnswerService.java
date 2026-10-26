@@ -2,6 +2,8 @@ package com.docmind.qa;
 
 import com.docmind.retrieval.ChunkSearchService;
 import com.docmind.retrieval.RetrievedChunk;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -25,18 +27,23 @@ public class QuestionAnswerService {
     private final ChunkSearchService searchService;
     private final AnswerPromptBuilder promptBuilder;
     private final ChatClient chatClient;
+    private final MeterRegistry meterRegistry;
 
     public QuestionAnswerService(ChunkSearchService searchService,
                                  AnswerPromptBuilder promptBuilder,
-                                 ChatClient.Builder chatClientBuilder) {
+                                 ChatClient.Builder chatClientBuilder,
+                                 MeterRegistry meterRegistry) {
         this.searchService = searchService;
         this.promptBuilder = promptBuilder;
         this.chatClient = chatClientBuilder.build();
+        this.meterRegistry = meterRegistry;
     }
 
     public Answer ask(String question, Integer topK, Collection<UUID> documentIds) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         List<RetrievedChunk> sources = searchService.search(question, topK, documentIds);
         if (sources.isEmpty()) {
+            sample.stop(answerTimer("none"));
             return new Answer(NO_CONTEXT_ANSWER, List.of());
         }
 
@@ -44,7 +51,19 @@ public class QuestionAnswerService {
                 .call()
                 .content();
 
+        sample.stop(answerTimer("found"));
         return new Answer(text, citationsFor(text, sources));
+    }
+
+    /**
+     * The sources tag separates fast "nothing found" answers from answers that
+     * waited for the chat model, otherwise the average would hide slow model calls.
+     */
+    private Timer answerTimer(String sources) {
+        return Timer.builder("docmind.answer.duration")
+                .description("Time to answer a question, including search and the chat model call")
+                .tag("sources", sources)
+                .register(meterRegistry);
     }
 
     /**

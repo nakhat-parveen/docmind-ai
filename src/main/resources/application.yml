@@ -88,11 +88,20 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # histogram buckets let Prometheus calculate percentiles such as p95
+      percentiles-histogram:
+        http.server.requests: true
+        docmind.documents.processing.duration: true
+        docmind.answer.duration: true
 
 springdoc:
   swagger-ui:

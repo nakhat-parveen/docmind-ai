@@ -3,6 +3,7 @@ package com.docmind.qa;
 import com.docmind.retrieval.ChunkSearchService;
 import com.docmind.retrieval.RetrievedChunk;
 import com.docmind.support.FakeChatModel;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -21,11 +22,24 @@ class QuestionAnswerServiceTest {
 
     private final ChunkSearchService searchService = mock(ChunkSearchService.class);
     private final FakeChatModel chatModel = new FakeChatModel();
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private QuestionAnswerService service;
 
     @BeforeEach
     void setUp() {
-        service = new QuestionAnswerService(searchService, new AnswerPromptBuilder(), ChatClient.builder(chatModel));
+        service = new QuestionAnswerService(searchService, new AnswerPromptBuilder(), ChatClient.builder(chatModel),
+                meterRegistry);
+    }
+
+    @Test
+    void recordsHowLongAnsweringTook() {
+        when(searchService.search(anyString(), any(), any())).thenReturn(List.of(chunk("a.txt", "Alpha")));
+        service.ask("What is alpha?", null, List.of());
+        when(searchService.search(anyString(), any(), any())).thenReturn(List.of());
+        service.ask("What is omega?", null, List.of());
+
+        assertThat(meterRegistry.get("docmind.answer.duration").tag("sources", "found").timer().count()).isEqualTo(1);
+        assertThat(meterRegistry.get("docmind.answer.duration").tag("sources", "none").timer().count()).isEqualTo(1);
     }
 
     @Test

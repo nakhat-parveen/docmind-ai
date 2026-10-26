@@ -8,6 +8,7 @@ import com.docmind.document.StoredDocument;
 import com.docmind.ingestion.DocumentProcessingException;
 import com.docmind.ingestion.DocumentType;
 import com.docmind.ingestion.IngestionService;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -27,13 +28,16 @@ public class DocumentProcessor {
     private final DocumentRepository documents;
     private final DocumentContentRepository contents;
     private final IngestionService ingestionService;
+    private final ProcessingMetrics metrics;
 
     public DocumentProcessor(DocumentRepository documents,
                              DocumentContentRepository contents,
-                             IngestionService ingestionService) {
+                             IngestionService ingestionService,
+                             ProcessingMetrics metrics) {
         this.documents = documents;
         this.contents = contents;
         this.ingestionService = ingestionService;
+        this.metrics = metrics;
     }
 
     public void process(UUID documentId) {
@@ -47,16 +51,22 @@ public class DocumentProcessor {
             return;
         }
 
+        Timer.Sample sample = metrics.startProcessing();
+        boolean success = false;
         try {
             document.markProcessing();
             document = documents.save(document);
             int chunks = ingest(document);
             document.markReady(chunks);
             documents.save(document);
+            success = true;
+            metrics.documentReady();
             log.info("Document {} is ready ({} chunks)", documentId, chunks);
         } catch (OptimisticLockingFailureException e) {
             log.info("Document {} was deleted while it was processed", documentId);
             ingestionService.deleteChunks(documentId);
+        } finally {
+            metrics.stopProcessing(sample, success);
         }
         // any other exception goes to the Kafka error handler, which retries or gives up
     }
@@ -71,6 +81,7 @@ public class DocumentProcessor {
                 ingestionService.deleteChunks(documentId);
                 document.markFailed(reason);
                 documents.save(document);
+                metrics.documentFailed();
             } catch (OptimisticLockingFailureException e) {
                 log.info("Document {} was deleted before it could be marked as failed", documentId);
             }

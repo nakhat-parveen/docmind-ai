@@ -25,13 +25,14 @@ public class KafkaErrorHandlingConfig {
     @Bean
     DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<?, ?> kafkaTemplate,
                                           DocumentProcessor processor,
-                                          ProcessingProperties properties) {
+                                          ProcessingProperties properties,
+                                          ProcessingMetrics metrics) {
         var deadLetter = new DeadLetterPublishingRecoverer(kafkaTemplate,
                 (record, exception) -> new TopicPartition(KafkaTopics.DOCUMENT_UPLOADED_DLT, -1));
 
         ConsumerRecordRecoverer recoverer = (record, exception) -> {
             if (record.value() instanceof DocumentUploadedEvent event) {
-                processor.markFailed(event.documentId(), reason(exception));
+                processor.markFailed(event.documentId(), cause(exception).getMessage());
             }
             deadLetter.accept(record, exception);
         };
@@ -39,13 +40,13 @@ public class KafkaErrorHandlingConfig {
         var backOff = new FixedBackOff(properties.retryInterval().toMillis(), properties.maxAttempts() - 1L);
         var errorHandler = new DefaultErrorHandler(recoverer, backOff);
         errorHandler.addNotRetryableExceptions(DocumentProcessingException.class, UnsupportedDocumentTypeException.class);
+        errorHandler.setRetryListeners((record, exception, attempt) -> metrics.listenerError(cause(exception)));
         return errorHandler;
     }
 
-    private static String reason(Exception exception) {
-        Throwable cause = exception instanceof ListenerExecutionFailedException && exception.getCause() != null
+    private static Throwable cause(Exception exception) {
+        return exception instanceof ListenerExecutionFailedException && exception.getCause() != null
                 ? exception.getCause()
                 : exception;
-        return cause.getMessage();
     }
 }

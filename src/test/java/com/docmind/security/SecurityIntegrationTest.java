@@ -46,6 +46,18 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    void keepsPrometheusEndpointPublic() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void protectsOtherActuatorEndpoints() throws Exception {
+        mockMvc.perform(get("/actuator/info"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void protectsMcpEndpoint() throws Exception {
         mockMvc.perform(get("/mcp"))
                 .andExpect(status().isUnauthorized());
