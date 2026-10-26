@@ -9,11 +9,13 @@ import org.springframework.ai.embedding.EmbeddingResponse;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 /**
  * Deterministic bag-of-words embedding. Texts sharing words end up close to each
  * other, which is enough to test retrieval without calling a real model.
+ * {@link #failNextCalls(int)} simulates an embedding service that is temporarily down.
  */
 public class FakeEmbeddingModel implements EmbeddingModel {
 
@@ -21,8 +23,17 @@ public class FakeEmbeddingModel implements EmbeddingModel {
 
     private static final Pattern NON_WORD = Pattern.compile("[^\\p{L}\\p{N}]+");
 
+    private final AtomicInteger failuresLeft = new AtomicInteger();
+
+    public void failNextCalls(int count) {
+        failuresLeft.set(count);
+    }
+
     @Override
     public EmbeddingResponse call(EmbeddingRequest request) {
+        if (failuresLeft.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
+            throw new IllegalStateException("Embedding service unavailable");
+        }
         List<Embedding> embeddings = new ArrayList<>();
         List<String> inputs = request.getInstructions();
         for (int i = 0; i < inputs.size(); i++) {

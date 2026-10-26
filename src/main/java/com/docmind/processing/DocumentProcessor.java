@@ -50,18 +50,31 @@ public class DocumentProcessor {
         try {
             document.markProcessing();
             document = documents.save(document);
-            try {
-                int chunks = ingest(document);
-                document.markReady(chunks);
-            } catch (RuntimeException e) {
-                log.warn("Processing of document {} failed", documentId, e);
-                document.markFailed(e.getMessage());
-            }
+            int chunks = ingest(document);
+            document.markReady(chunks);
             documents.save(document);
+            log.info("Document {} is ready ({} chunks)", documentId, chunks);
         } catch (OptimisticLockingFailureException e) {
             log.info("Document {} was deleted while it was processed", documentId);
             ingestionService.deleteChunks(documentId);
         }
+        // any other exception goes to the Kafka error handler, which retries or gives up
+    }
+
+    /**
+     * Called once all attempts are used up or the error is not worth retrying.
+     */
+    public void markFailed(UUID documentId, String reason) {
+        log.warn("Giving up on document {}: {}", documentId, reason);
+        documents.findById(documentId).ifPresent(document -> {
+            try {
+                ingestionService.deleteChunks(documentId);
+                document.markFailed(reason);
+                documents.save(document);
+            } catch (OptimisticLockingFailureException e) {
+                log.info("Document {} was deleted before it could be marked as failed", documentId);
+            }
+        });
     }
 
     private int ingest(StoredDocument document) {

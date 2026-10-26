@@ -74,6 +74,9 @@ docmind:
   ingestion:
     chunk-size: 400
     min-chunk-size-chars: 200
+  processing:
+    max-attempts: 3
+    retry-interval: 2s
   retrieval:
     default-top-k: 5
     similarity-threshold: 0.3
