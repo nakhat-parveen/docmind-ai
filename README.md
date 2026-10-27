@@ -17,13 +17,15 @@ tools and agents can query your documents directly.
 ## Features
 
 - **Upload PDF and TXT** files. Text is extracted page by page, split into token-based chunks and embedded
+- **Background processing with Kafka**: uploads return right away, a consumer indexes them with retries and a dead-letter topic
 - **Semantic search** over all chunks, optionally restricted to selected documents
 - **Q&A with citations**: answers are grounded in the retrieved chunks and reference them as `[1]`, `[2]`, …
 - **Document management** REST API with pagination, duplicate detection (SHA-256) and failure tracking
 - **MCP server** (Streamable HTTP) with `search_documents`, `ask_documents` and `list_documents` tools
 - **API key authentication** for REST and MCP endpoints, with RFC 9457 problem details for all errors
 - **OpenAPI / Swagger UI** documentation
-- **Small web UI** for uploading, browsing and asking questions
+- **Small web UI** for uploading, browsing and asking questions, with live processing status
+- **Monitoring**: Prometheus metrics, a provisioned Grafana dashboard and correlation ids in every log line
 - **Provider profiles**: `ollama` (default, local) and `openai`
 - **Flyway** migrations, **Testcontainers** integration tests, **Docker** image and **GitHub Actions** CI
 
@@ -44,23 +46,30 @@ flowchart LR
         AC[AskController]
         MCP[MCP server<br/>DocumentTools]
         DS[DocumentService]
+        DP[DocumentProcessor<br/>Kafka consumer]
         IS[IngestionService<br/>extract → chunk → embed]
         CS[ChunkSearchService]
         QA[QuestionAnswerService]
     end
 
+    KAFKA[[Kafka<br/>document-uploaded<br/>+ dead-letter topic]]
+
     subgraph Postgres[PostgreSQL + pgvector]
-        DOCS[(documents)]
+        DOCS[(documents +<br/>document_contents)]
         VS[(vector_store)]
     end
 
     LLM[Chat + embedding model<br/>Ollama or OpenAI]
+    PROM[Prometheus + Grafana]
 
     UI & REST --> SEC
     MCPC --> SEC
     SEC --> DC & SC & AC & MCP
-    DC --> DS --> IS
+    DC --> DS
     DS --> DOCS
+    DS -- DocumentUploaded --> KAFKA --> DP
+    DP --> DOCS
+    DP --> IS
     IS -- embeddings --> LLM
     IS --> VS
     SC --> CS
@@ -69,6 +78,7 @@ flowchart LR
     CS -- query embedding --> LLM
     CS -- similarity search --> VS
     QA -- grounded prompt --> LLM
+    PROM -. scrapes /actuator/prometheus .-> App
 ```
 
 ### Ingestion and question flow
@@ -78,14 +88,22 @@ sequenceDiagram
     autonumber
     participant C as Client
     participant D as DocMind
+    participant K as Kafka
+    participant W as Consumer
     participant M as Model provider
-    participant P as pgvector
+    participant P as PostgreSQL
 
     C->>D: POST /api/documents (PDF/TXT)
-    D->>D: extract text per page, split into ~400 token chunks
-    D->>M: embed chunks
-    D->>P: store chunks + embeddings + metadata
-    D-->>C: 201 Created (status READY, chunkCount)
+    D->>P: store document (PENDING) + file content
+    D->>K: DocumentUploaded {documentId}
+    D-->>C: 202 Accepted (status PENDING)
+    K->>W: DocumentUploaded
+    W->>P: status PROCESSING, load file content
+    W->>W: extract text per page, split into ~400 token chunks
+    W->>M: embed chunks
+    W->>P: store chunks + embeddings, status READY
+    C->>D: GET /api/documents/{id}
+    D-->>C: status READY, chunkCount
 
     C->>D: POST /api/ask {"question": "..."}
     D->>M: embed question
@@ -101,12 +119,14 @@ The code is organised by feature, each package containing its controller, servic
 
 ```
 com.docmind
-├── document    REST API, entity and repository for uploaded documents
+├── document    REST API, entities and repositories for uploaded documents
+├── processing  Kafka topics, producer, consumer, retries and processing metrics
 ├── ingestion   text extraction, chunking, writing to the vector store
 ├── retrieval   similarity search and the /api/search endpoint
 ├── qa          prompt building, answer + citation handling, /api/ask
 ├── mcp         MCP tool definitions
 ├── security    API key filter and Spring Security setup
+├── logging     correlation id filter and Kafka record interceptor
 ├── config      OpenAPI configuration
 └── web         global exception handling
 ```
@@ -116,12 +136,12 @@ com.docmind
 ### Prerequisites
 
 - Java 21
-- Docker (for PostgreSQL, Ollama and the tests)
+- Docker (for PostgreSQL, Kafka, Ollama and the tests)
 
 ### Run locally with Ollama
 
 ```bash
-# PostgreSQL with pgvector and Ollama
+# PostgreSQL with pgvector, Kafka and Ollama
 docker compose --profile ollama up -d
 
 # start the app (the ollama profile is the default)
@@ -134,7 +154,7 @@ take a few minutes. Then open <http://localhost:8080> and enter the API key `loc
 ### Run with OpenAI
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres kafka
 export OPENAI_API_KEY=sk-...
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=openai
 ```
@@ -150,6 +170,9 @@ cp .env.example .env    # set DOCMIND_API_KEYS and the provider
 docker compose --profile app up -d --build
 ```
 
+This starts the app together with PostgreSQL, Kafka, Ollama, Prometheus and Grafana. In this
+setup the app writes JSON log lines (Elastic Common Schema), ready for a log collector.
+
 ### Configuration
 
 | Variable                 | Default                                   | Description                          |
@@ -163,9 +186,11 @@ docker compose --profile app up -d --build
 | `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text`                        | Ollama embedding model (768 dims)    |
 | `OPENAI_API_KEY`         | –                                         | Required for the `openai` profile    |
 | `OPENAI_CHAT_MODEL`      | `gpt-4o-mini`                             | OpenAI chat model                    |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092`                         | Kafka broker address                 |
+| `GRAFANA_ADMIN_PASSWORD` | `admin`                                   | Password of the Grafana `admin` user |
 
-Chunking and retrieval can be tuned under `docmind.ingestion.*` and `docmind.retrieval.*` in
-`application.yml`.
+Chunking, retrieval and retries can be tuned under `docmind.ingestion.*`, `docmind.retrieval.*`
+and `docmind.processing.*` (`max-attempts`, `retry-interval`) in `application.yml`.
 
 ## Usage
 
@@ -174,8 +199,11 @@ All `/api/**` and `/mcp` requests need the `X-API-Key` header.
 ```bash
 export KEY=local-dev-key
 
-# upload
+# upload (returns 202 Accepted with status PENDING)
 curl -H "X-API-Key: $KEY" -F file=@handbook.pdf http://localhost:8080/api/documents
+
+# check the status until it is READY (or FAILED, with an errorMessage)
+curl -H "X-API-Key: $KEY" http://localhost:8080/api/documents/<id>
 
 # list
 curl -H "X-API-Key: $KEY" "http://localhost:8080/api/documents?page=0&size=20"
@@ -226,9 +254,9 @@ Errors are returned as problem details:
 
 | Method   | Path                    | Description                                   |
 |----------|-------------------------|-----------------------------------------------|
-| `POST`   | `/api/documents`        | Upload a PDF/TXT file (multipart, field `file`) |
+| `POST`   | `/api/documents`        | Upload a PDF/TXT file (multipart, field `file`), processed in the background |
 | `GET`    | `/api/documents`        | List documents (paged, newest first)          |
-| `GET`    | `/api/documents/{id}`   | Get document details                          |
+| `GET`    | `/api/documents/{id}`   | Get document details and processing status    |
 | `DELETE` | `/api/documents/{id}`   | Delete a document and its chunks              |
 | `POST`   | `/api/search`           | Semantic search over chunks                   |
 | `POST`   | `/api/ask`              | Ask a question, get an answer with citations  |
@@ -266,19 +294,69 @@ Most MCP clients that support remote servers accept a configuration like this:
 }
 ```
 
+## Document processing
+
+Uploading and indexing are separate steps:
+
+1. `POST /api/documents` checks the file type and duplicates, stores the document with status
+   `PENDING` together with the file content, and answers `202 Accepted`.
+2. After the database commit, a `DocumentUploaded` event with only the document id is sent to the
+   Kafka topic `docmind.document-uploaded`. The id is the message key, so events for the same
+   document stay in order.
+3. A Kafka consumer sets the status to `PROCESSING`, extracts, chunks and embeds the file and sets
+   it to `READY`.
+4. If that fails, the message is retried (3 attempts, 2 seconds apart by default). Errors that
+   retrying cannot fix, such as a corrupt PDF, are not retried. When it gives up, the document is
+   set to `FAILED` with the error message and the event is copied to `docmind.document-uploaded.dlt`
+   for later inspection.
+
+Processing is safe to repeat: old chunks of the document are removed before new ones are written,
+and documents that are already `READY` or deleted are skipped. The web UI refreshes the list until
+all documents are done.
+
+## Monitoring
+
+| Service    | URL                                        | Notes                          |
+|------------|--------------------------------------------|--------------------------------|
+| Metrics    | <http://localhost:8080/actuator/prometheus> | Prometheus format, no API key  |
+| Prometheus | <http://localhost:9090>                     | scrapes the app every 15 s     |
+| Grafana    | <http://localhost:3000>                     | user `admin`, dashboard "DocMind" |
+
+Start Prometheus and Grafana on their own with `docker compose --profile monitoring up -d`, or
+together with everything else using the `app` profile. The dashboard is provisioned from
+`monitoring/grafana/dashboards/docmind.json`.
+
+Custom metrics:
+
+| Metric                                      | Type    | Meaning                                         |
+|---------------------------------------------|---------|-------------------------------------------------|
+| `docmind_documents_processed_total`         | counter | finished documents, tag `outcome` = `ready` / `failed` |
+| `docmind_documents_processing_duration_seconds` | timer | time of one processing attempt                 |
+| `docmind_kafka_listener_errors_total`       | counter | failed processing attempts, tag `exception`     |
+| `docmind_answer_duration_seconds`           | timer   | time to answer a question, tag `sources` = `found` / `none` |
+
+Kafka client metrics such as `kafka_consumer_fetch_manager_records_lag_max` (messages waiting to be
+processed), HTTP, JVM and connection pool metrics come from Spring Boot and Micrometer.
+
+Every request gets a correlation id. It is taken from the `X-Correlation-Id` request header or
+generated, returned in the response, added to every log line and passed on as a Kafka header, so
+the log lines of an upload and of its background processing can be found with one search.
+
 ## Testing
 
 ```bash
 ./mvnw verify
 ```
 
-Docker must be running. Integration tests start a `pgvector/pgvector:pg16` container through
-Testcontainers and use a deterministic in-memory embedding model and a stub chat model, so no
+Docker must be running. Integration tests start `pgvector/pgvector:pg16` and Kafka containers
+through Testcontainers and use a deterministic in-memory embedding model and a stub chat model, so no
 model provider or API key is needed. The suite covers:
 
 - unit tests for type detection, text extraction, chunking, prompt building and citation handling
 - repository tests against the real schema created by Flyway
 - end-to-end API tests for upload, search, ask, validation and error responses
+- Kafka tests for background processing, retries, the dead-letter topic and repeated messages
+- metrics and correlation id tests
 - security tests for protected and public endpoints
 - an MCP test that connects a real MCP client to the running server
 - context tests for the `ollama` and `openai` profiles
@@ -294,13 +372,16 @@ model provider or API key is needed. The suite covers:
   so every chunk keeps its page number for citations.
 - **Grounded prompt**: retrieved chunks are numbered in the prompt and the model is told to answer
   only from them and cite `[n]`. If nothing relevant is found, the model is not called at all.
-- **Ingestion runs synchronously** and outside of a database transaction, the document row tracks
-  `PROCESSING`, `READY` or `FAILED`. Moving it to a queue would be the next step for large files.
+- **Ingestion runs in the background** through Kafka, so slow embedding calls never block an
+  upload request. The event carries only the document id; the file itself stays in PostgreSQL
+  because Kafka messages are limited to about 1 MB by default.
+- **Optimistic locking** (`@Version`) on documents: if a document is deleted while it is being
+  processed, the late status update fails instead of bringing the row back.
 - **API keys** are compared in constant time. The API is stateless, so CSRF protection is disabled.
 
 ## Roadmap
 
-- Asynchronous ingestion with progress updates
+- Transactional outbox, so an upload event cannot get lost if Kafka is down at that moment
 - Hybrid search (full-text + vector) and re-ranking
 - Streaming answers via Server-Sent Events
 - Per-user document collections with JWT authentication
