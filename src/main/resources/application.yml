@@ -106,3 +106,8 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+logging:
+  pattern:
+    # added to every log line, filled by CorrelationIdFilter and the Kafka record interceptor
+    correlation: "[%X{correlationId:-}] "

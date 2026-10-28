@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: docmind
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # the app service from docker-compose.yml; use host.docker.internal:8080 when the app runs in the IDE
+      - targets: ["app:8080"]
