@@ -313,7 +313,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Consumer lag",
+      "title": "Outbox pending",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -321,7 +321,49 @@
       "gridPos": {
         "x": 0,
         "y": 14,
-        "w": 12,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(docmind_outbox_pending)",
+          "legendFormat": "pending"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Uploads stored but not yet sent to Kafka. Keeps growing when Kafka is unreachable"
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Consumer lag",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 14,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -352,7 +394,7 @@
       }
     },
     {
-      "id": 10,
+      "id": 11,
       "type": "timeseries",
       "title": "Listener errors by exception",
       "datasource": {
@@ -360,9 +402,9 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
+        "x": 16,
         "y": 14,
-        "w": 12,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -394,7 +436,7 @@
       "description": "Failed attempts per minute"
     },
     {
-      "id": 11,
+      "id": 12,
       "type": "row",
       "title": "Questions and API",
       "collapsed": false,
@@ -407,7 +449,7 @@
       "panels": []
     },
     {
-      "id": 12,
+      "id": 13,
       "type": "timeseries",
       "title": "Answer latency",
       "datasource": {
@@ -458,7 +500,7 @@
       "description": "Search plus chat model call, for questions where sources were found"
     },
     {
-      "id": 13,
+      "id": 14,
       "type": "timeseries",
       "title": "HTTP requests",
       "datasource": {
@@ -500,7 +542,7 @@
       "description": "API requests per minute"
     },
     {
-      "id": 14,
+      "id": 15,
       "type": "timeseries",
       "title": "JVM heap used",
       "datasource": {
@@ -550,7 +592,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 16,
       "type": "timeseries",
       "title": "Database connections",
       "datasource": {

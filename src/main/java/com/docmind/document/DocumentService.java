@@ -3,9 +3,12 @@ package com.docmind.document;
 import com.docmind.ingestion.DocumentProcessingException;
 import com.docmind.ingestion.DocumentType;
 import com.docmind.ingestion.IngestionService;
-import com.docmind.processing.DocumentEventPublisher;
+import com.docmind.logging.CorrelationId;
+import com.docmind.outbox.OutboxEvent;
+import com.docmind.outbox.OutboxEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -26,25 +29,26 @@ public class DocumentService {
     private final DocumentRepository repository;
     private final DocumentContentRepository contentRepository;
     private final IngestionService ingestionService;
-    private final DocumentEventPublisher eventPublisher;
+    private final OutboxEventRepository outboxRepository;
     private final TransactionTemplate transactionTemplate;
 
     public DocumentService(DocumentRepository repository,
                            DocumentContentRepository contentRepository,
                            IngestionService ingestionService,
-                           DocumentEventPublisher eventPublisher,
+                           OutboxEventRepository outboxRepository,
                            TransactionTemplate transactionTemplate) {
         this.repository = repository;
         this.contentRepository = contentRepository;
         this.ingestionService = ingestionService;
-        this.eventPublisher = eventPublisher;
+        this.outboxRepository = outboxRepository;
         this.transactionTemplate = transactionTemplate;
     }
 
     /**
-     * Validates and stores the upload, then hands it over to background processing.
-     * The event is published only after the transaction committed, so the consumer
-     * always finds the document in the database.
+     * Validates and stores the upload together with an outbox event in one transaction.
+     * {@link com.docmind.outbox.OutboxRelay} sends the event to Kafka afterwards, so an
+     * upload is accepted even when Kafka is down and no event is lost or sent for a
+     * document that was never saved.
      */
     public StoredDocument upload(String originalFilename, String contentType, byte[] content) {
         if (content.length == 0) {
@@ -68,10 +72,10 @@ public class DocumentService {
             StoredDocument saved = repository.save(
                     new StoredDocument(filename, type.mediaType(), content.length, checksum));
             contentRepository.save(new DocumentContent(saved.getId(), content));
+            outboxRepository.save(new OutboxEvent(saved.getId(), MDC.get(CorrelationId.MDC_KEY)));
             return saved;
         });
 
-        eventPublisher.documentUploaded(document.getId());
         log.info("Accepted document {} ({}) for processing", document.getId(), filename);
         return document;
     }
