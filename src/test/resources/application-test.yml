@@ -10,6 +10,8 @@ docmind:
     min-chunk-size-chars: 50
   processing:
     retry-interval: 100ms
+  outbox:
+    poll-interval: 100ms
   retrieval:
     similarity-threshold: 0.05
   security:

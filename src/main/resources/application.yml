@@ -34,6 +34,10 @@ spring:
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
         spring.json.add.type.headers: false
+        # fail fast when Kafka is down; the outbox relay retries on its next run
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
     consumer:
       group-id: docmind
       auto-offset-reset: earliest
@@ -77,6 +81,13 @@ docmind:
   processing:
     max-attempts: 3
     retry-interval: 2s
+  outbox:
+    poll-interval: 1s
+    batch-size: 50
+    # a bit longer than delivery.timeout.ms, so the producer gives up first
+    send-timeout: 15s
+    retention: 7d
+    cleanup-cron: "0 0 3 * * *"
   retrieval:
     default-top-k: 5
     similarity-threshold: 0.3
@@ -104,6 +115,8 @@ management:
         docmind.answer.duration: true
 
 springdoc:
+  # the API answers with JSON; without this the docs show */* for every response
+  default-produces-media-type: application/json
   swagger-ui:
     path: /swagger-ui.html
 

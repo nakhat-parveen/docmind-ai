@@ -1,6 +1,7 @@
 package com.docmind.retrieval;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,6 +24,8 @@ public class SearchController {
 
     @PostMapping
     @Operation(summary = "Return the chunks most similar to the query")
+    @ApiResponse(responseCode = "200", description = "Matching chunks, best first; empty when nothing is similar enough")
+    @ApiResponse(responseCode = "400", description = "The query is blank, too long, or topK is out of range")
     public List<RetrievedChunk> search(@Valid @RequestBody SearchRequestBody request) {
         return searchService.search(request.query(), request.topK(), request.documentIds());
     }

@@ -1,6 +1,7 @@
 package com.docmind.qa;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,6 +22,8 @@ public class AskController {
 
     @PostMapping
     @Operation(summary = "Answer a question with citations to the source chunks")
+    @ApiResponse(responseCode = "200", description = "The answer with its citations; says so when no source was found")
+    @ApiResponse(responseCode = "400", description = "The question is blank, too long, or topK is out of range")
     public Answer ask(@Valid @RequestBody AskRequest request) {
         return questionAnswerService.ask(request.question(), request.topK(), request.documentIds());
     }
