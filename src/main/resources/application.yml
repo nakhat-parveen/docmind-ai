@@ -115,6 +115,8 @@ management:
         docmind.answer.duration: true
 
 springdoc:
+  # the API answers with JSON; without this the docs show */* for every response
+  default-produces-media-type: application/json
   swagger-ui:
     path: /swagger-ui.html
 

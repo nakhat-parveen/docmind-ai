@@ -1,7 +1,9 @@
 package com.docmind.document;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -33,6 +35,12 @@ public class DocumentController {
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Upload a PDF or TXT file. It is indexed in the background; poll the document for its status")
+    @ApiResponse(responseCode = "202", description = "Stored with status PENDING; the Location header points to the document")
+    @ApiResponse(responseCode = "400", description = "The request has no 'file' part")
+    @ApiResponse(responseCode = "409", description = "The same file was already uploaded; see existingDocumentId")
+    @ApiResponse(responseCode = "413", description = "The file is larger than 20 MB")
+    @ApiResponse(responseCode = "415", description = "The file is not a PDF or TXT file")
+    @ApiResponse(responseCode = "422", description = "The file is empty")
     public ResponseEntity<DocumentResponse> upload(@RequestPart("file") MultipartFile file) throws IOException {
         StoredDocument document = documentService.upload(
                 file.getOriginalFilename(), file.getContentType(), file.getBytes());
@@ -45,19 +53,25 @@ public class DocumentController {
 
     @GetMapping
     @Operation(summary = "List uploaded documents, newest first")
+    @ApiResponse(responseCode = "200", description = "One page of documents")
     public PageResponse<DocumentResponse> list(
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+            @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         return PageResponse.of(documentService.list(pageable), DocumentResponse::from);
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "Get a single document")
+    @ApiResponse(responseCode = "200", description = "The document and its processing status")
+    @ApiResponse(responseCode = "404", description = "No document with this id")
     public DocumentResponse get(@PathVariable UUID id) {
         return DocumentResponse.from(documentService.get(id));
     }
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete a document and all of its indexed chunks")
+    @ApiResponse(responseCode = "204", description = "Deleted")
+    @ApiResponse(responseCode = "404", description = "No document with this id")
+    @ApiResponse(responseCode = "409", description = "The document is being processed right now; try again")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         documentService.delete(id);
         return ResponseEntity.noContent().build();
