@@ -1,7 +1,9 @@
 package com.docmind.web;
 
 import com.docmind.document.DocumentNotFoundException;
+import com.docmind.document.DocumentStatus;
 import com.docmind.document.DuplicateDocumentException;
+import com.docmind.document.InvalidDocumentSortException;
 import com.docmind.ingestion.DocumentProcessingException;
 import com.docmind.ingestion.UnsupportedDocumentTypeException;
 import org.slf4j.Logger;
@@ -14,6 +16,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.lang.Nullable;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -66,6 +69,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Document could not be processed", ex.getMessage());
     }
 
+    @ExceptionHandler(InvalidDocumentSortException.class)
+    ProblemDetail handleInvalidSort(InvalidDocumentSortException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid sort", ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception ex) {
         log.error("Unhandled exception", ex);
@@ -84,6 +92,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "Validation failed", "Request contains invalid fields");
         problem.setProperty("errors", errors);
         return ResponseEntity.badRequest().body(problem);
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleTypeMismatch(TypeMismatchException ex,
+                                                        HttpHeaders headers,
+                                                        HttpStatusCode status,
+                                                        WebRequest request) {
+        if (ex.getRequiredType() == DocumentStatus.class) {
+            ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "Invalid status",
+                    "status must be one of PENDING, PROCESSING, READY, FAILED");
+            return ResponseEntity.badRequest().body(problem);
+        }
+        return super.handleTypeMismatch(ex, headers, status, request);
     }
 
     private static ProblemDetail problem(HttpStatus status, String title, @Nullable String detail) {

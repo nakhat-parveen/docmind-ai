@@ -80,7 +80,7 @@ class OpenApiIntegrationTest {
     void describesPagingAsSeparateQueryParameters() throws Exception {
         JsonNode parameters = apiDocs().at("/paths/~1api~1documents/get/parameters");
 
-        assertThat(parameters.findValuesAsText("name")).contains("page", "size", "sort");
+        assertThat(parameters.findValuesAsText("name")).contains("page", "size", "sort", "status", "name");
     }
 
     @Test

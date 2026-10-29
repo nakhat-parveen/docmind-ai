@@ -1,6 +1,7 @@
 package com.docmind.document;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springdoc.core.annotations.ParameterObject;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -52,11 +54,16 @@ public class DocumentController {
     }
 
     @GetMapping
-    @Operation(summary = "List uploaded documents, newest first")
+    @Operation(summary = "List uploaded documents, newest first. Filter by status and filename.")
     @ApiResponse(responseCode = "200", description = "One page of documents")
+    @ApiResponse(responseCode = "400", description = "Unknown status or sort field")
     public PageResponse<DocumentResponse> list(
+            @Parameter(description = "Only documents with this processing status")
+            @RequestParam(required = false) DocumentStatus status,
+            @Parameter(description = "Only documents whose filename contains this text (case-insensitive)")
+            @RequestParam(required = false) String name,
             @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return PageResponse.of(documentService.list(pageable), DocumentResponse::from);
+        return PageResponse.of(documentService.list(new DocumentFilter(status, name), pageable), DocumentResponse::from);
     }
 
     @GetMapping("/{id}")

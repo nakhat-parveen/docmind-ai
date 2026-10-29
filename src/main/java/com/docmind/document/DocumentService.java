@@ -82,7 +82,12 @@ public class DocumentService {
 
     @Transactional(readOnly = true)
     public Page<StoredDocument> list(Pageable pageable) {
-        return repository.findAll(pageable);
+        return list(DocumentFilter.none(), pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<StoredDocument> list(DocumentFilter filter, Pageable pageable) {
+        return repository.findAll(filter.toSpecification(), DocumentSort.apply(pageable));
     }
 
     @Transactional(readOnly = true)

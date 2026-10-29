@@ -7,6 +7,8 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +43,20 @@ class DocumentRepositoryTest {
 
         assertThatThrownBy(() -> repository.saveAndFlush(new StoredDocument("b.txt", "text/plain", 10, "same")))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void filtersByStatusAndName() {
+        repository.saveAndFlush(new StoredDocument("handbook.pdf", "application/pdf", 10, "a"));
+        var failed = new StoredDocument("notes.txt", "text/plain", 10, "b");
+        failed.markFailed("corrupt");
+        repository.saveAndFlush(failed);
+        repository.saveAndFlush(new StoredDocument("invoices.txt", "text/plain", 10, "c"));
+
+        var page = repository.findAll(new DocumentFilter(DocumentStatus.PENDING, "inv").toSpecification(),
+                PageRequest.of(0, 10, Sort.by("filename")));
+
+        assertThat(page.getContent()).extracting(StoredDocument::getFilename).containsExactly("invoices.txt");
     }
 
     @Test
