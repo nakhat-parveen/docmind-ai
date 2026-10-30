@@ -24,6 +24,7 @@ public class AskController {
     @Operation(summary = "Answer a question with citations to the source chunks")
     @ApiResponse(responseCode = "200", description = "The answer with its citations; says so when no source was found")
     @ApiResponse(responseCode = "400", description = "The question is blank, too long, or topK is out of range")
+    @ApiResponse(responseCode = "429", description = "This API key has asked too many questions; see Retry-After")
     public Answer ask(@Valid @RequestBody AskRequest request) {
         return questionAnswerService.ask(request.question(), request.topK(), request.documentIds());
     }

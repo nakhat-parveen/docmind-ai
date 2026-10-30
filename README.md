@@ -17,13 +17,14 @@ tools and agents can query your documents directly.
 ## Features
 
 - **Upload PDF and TXT** files. Text is extracted page by page, split into token-based chunks and embedded
-- **Background processing with Kafka**: uploads return right away, a consumer indexes them with retries and a dead-letter topic
+- **Background processing with Kafka**: uploads return right away; a transactional outbox publishes the event, a consumer indexes with retries and a dead-letter topic
 - **Semantic search** over all chunks, optionally restricted to selected documents
 - **Q&A with citations**: answers are grounded in the retrieved chunks and reference them as `[1]`, `[2]`, …
-- **Document management** REST API with pagination, duplicate detection (SHA-256) and failure tracking
+- **Document management** REST API with pagination, status/name filters, duplicate detection (SHA-256) and failure tracking
 - **MCP server** (Streamable HTTP) with `search_documents`, `ask_documents` and `list_documents` tools
 - **API key authentication** for REST and MCP endpoints, with RFC 9457 problem details for all errors
-- **OpenAPI / Swagger UI** documentation
+- **OpenAPI / Swagger UI** with documented success and error responses
+- **Rate limit** on `/api/ask` (token bucket per API key)
 - **Small web UI** for uploading, browsing and asking questions, with live processing status
 - **Monitoring**: Prometheus metrics, a provisioned Grafana dashboard and correlation ids in every log line
 - **Provider profiles**: `ollama` (default, local) and `openai`
@@ -46,6 +47,7 @@ flowchart LR
         AC[AskController]
         MCP[MCP server<br/>DocumentTools]
         DS[DocumentService]
+        OX[OutboxRelay]
         DP[DocumentProcessor<br/>Kafka consumer]
         IS[IngestionService<br/>extract → chunk → embed]
         CS[ChunkSearchService]
@@ -55,7 +57,7 @@ flowchart LR
     KAFKA[[Kafka<br/>document-uploaded<br/>+ dead-letter topic]]
 
     subgraph Postgres[PostgreSQL + pgvector]
-        DOCS[(documents +<br/>document_contents)]
+        DOCS[(documents +<br/>document_contents +<br/>outbox_events)]
         VS[(vector_store)]
     end
 
@@ -67,7 +69,8 @@ flowchart LR
     SEC --> DC & SC & AC & MCP
     DC --> DS
     DS --> DOCS
-    DS -- DocumentUploaded --> KAFKA --> DP
+    OX --> DOCS
+    OX -- DocumentUploaded --> KAFKA --> DP
     DP --> DOCS
     DP --> IS
     IS -- embeddings --> LLM
@@ -94,9 +97,9 @@ sequenceDiagram
     participant P as PostgreSQL
 
     C->>D: POST /api/documents (PDF/TXT)
-    D->>P: store document (PENDING) + file content
-    D->>K: DocumentUploaded {documentId}
+    D->>P: store document (PENDING) + file content + outbox row
     D-->>C: 202 Accepted (status PENDING)
+    D->>K: OutboxRelay publishes DocumentUploaded
     K->>W: DocumentUploaded
     W->>P: status PROCESSING, load file content
     W->>W: extract text per page, split into ~400 token chunks
@@ -120,10 +123,12 @@ The code is organised by feature, each package containing its controller, servic
 ```
 com.docmind
 ├── document    REST API, entities and repositories for uploaded documents
+├── outbox      transactional outbox table and scheduled Kafka relay
 ├── processing  Kafka topics, producer, consumer, retries and processing metrics
 ├── ingestion   text extraction, chunking, writing to the vector store
 ├── retrieval   similarity search and the /api/search endpoint
 ├── qa          prompt building, answer + citation handling, /api/ask
+├── ratelimit   per-API-key token bucket on /api/ask
 ├── mcp         MCP tool definitions
 ├── security    API key filter and Spring Security setup
 ├── logging     correlation id filter and Kafka record interceptor
@@ -189,8 +194,9 @@ setup the app writes JSON log lines (Elastic Common Schema), ready for a log col
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092`                         | Kafka broker address                 |
 | `GRAFANA_ADMIN_PASSWORD` | `admin`                                   | Password of the Grafana `admin` user |
 
-Chunking, retrieval and retries can be tuned under `docmind.ingestion.*`, `docmind.retrieval.*`
-and `docmind.processing.*` (`max-attempts`, `retry-interval`) in `application.yml`.
+Chunking, retrieval, retries, the outbox relay and the ask rate limit can be tuned under
+`docmind.ingestion.*`, `docmind.retrieval.*`, `docmind.processing.*`, `docmind.outbox.*` and
+`docmind.rate-limit.*` in `application.yml`.
 
 ## Usage
 
@@ -205,8 +211,9 @@ curl -H "X-API-Key: $KEY" -F file=@handbook.pdf http://localhost:8080/api/docume
 # check the status until it is READY (or FAILED, with an errorMessage)
 curl -H "X-API-Key: $KEY" http://localhost:8080/api/documents/<id>
 
-# list
-curl -H "X-API-Key: $KEY" "http://localhost:8080/api/documents?page=0&size=20"
+# list (optional status, name, page, size, sort)
+curl -H "X-API-Key: $KEY" \
+     "http://localhost:8080/api/documents?status=READY&name=hand&page=0&size=20&sort=createdAt,desc"
 
 # semantic search
 curl -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
@@ -255,13 +262,14 @@ Errors are returned as problem details:
 | Method   | Path                    | Description                                   |
 |----------|-------------------------|-----------------------------------------------|
 | `POST`   | `/api/documents`        | Upload a PDF/TXT file (multipart, field `file`), processed in the background |
-| `GET`    | `/api/documents`        | List documents (paged, newest first)          |
+| `GET`    | `/api/documents`        | List documents (paged; `status`, `name`, `sort`) |
 | `GET`    | `/api/documents/{id}`   | Get document details and processing status    |
 | `DELETE` | `/api/documents/{id}`   | Delete a document and its chunks              |
 | `POST`   | `/api/search`           | Semantic search over chunks                   |
-| `POST`   | `/api/ask`              | Ask a question, get an answer with citations  |
+| `POST`   | `/api/ask`              | Ask a question, get an answer with citations (rate limited per API key) |
 
-Interactive docs: <http://localhost:8080/swagger-ui.html> (OpenAPI JSON at `/v3/api-docs`).
+Interactive docs: <http://localhost:8080/swagger-ui.html> (OpenAPI JSON at `/v3/api-docs`). Error
+responses are documented as RFC 9457 problem details.
 
 ### MCP server
 
@@ -298,11 +306,13 @@ Most MCP clients that support remote servers accept a configuration like this:
 
 Uploading and indexing are separate steps:
 
-1. `POST /api/documents` checks the file type and duplicates, stores the document with status
-   `PENDING` together with the file content, and answers `202 Accepted`.
-2. After the database commit, a `DocumentUploaded` event with only the document id is sent to the
-   Kafka topic `docmind.document-uploaded`. The id is the message key, so events for the same
-   document stay in order.
+1. `POST /api/documents` checks the file type and duplicates, then stores the document (`PENDING`),
+   the file content and an outbox row in **one database transaction**, and answers `202 Accepted`.
+   Kafka being down does not fail the upload.
+2. A scheduled relay (`OutboxRelay`) reads unsent rows (`FOR UPDATE SKIP LOCKED`), publishes a
+   `DocumentUploaded` event to `docmind.document-uploaded` and marks the row sent. The document id
+   is the message key, so events for the same document stay in order. If Kafka is down the row stays
+   unsent and is tried again on the next run.
 3. A Kafka consumer sets the status to `PROCESSING`, extracts, chunks and embeds the file and sets
    it to `READY`.
 4. If that fails, the message is retried (3 attempts, 2 seconds apart by default). Errors that
@@ -333,6 +343,7 @@ Custom metrics:
 | `docmind_documents_processed_total`         | counter | finished documents, tag `outcome` = `ready` / `failed` |
 | `docmind_documents_processing_duration_seconds` | timer | time of one processing attempt                 |
 | `docmind_kafka_listener_errors_total`       | counter | failed processing attempts, tag `exception`     |
+| `docmind_outbox_pending`                    | gauge   | upload events stored but not yet sent to Kafka  |
 | `docmind_answer_duration_seconds`           | timer   | time to answer a question, tag `sources` = `found` / `none` |
 
 Kafka client metrics such as `kafka_consumer_fetch_manager_records_lag_max` (messages waiting to be
@@ -354,9 +365,9 @@ model provider or API key is needed. The suite covers:
 
 - unit tests for type detection, text extraction, chunking, prompt building and citation handling
 - repository tests against the real schema created by Flyway
-- end-to-end API tests for upload, search, ask, validation and error responses
-- Kafka tests for background processing, retries, the dead-letter topic and repeated messages
-- metrics and correlation id tests
+- end-to-end API tests for upload, list filters, search, ask, validation and error responses
+- Kafka tests for background processing, retries, the dead-letter topic and uploads while Kafka is down
+- metrics, correlation id and rate-limit tests
 - security tests for protected and public endpoints
 - an MCP test that connects a real MCP client to the running server
 - context tests for the `ollama` and `openai` profiles
@@ -373,18 +384,22 @@ model provider or API key is needed. The suite covers:
 - **Grounded prompt**: retrieved chunks are numbered in the prompt and the model is told to answer
   only from them and cite `[n]`. If nothing relevant is found, the model is not called at all.
 - **Ingestion runs in the background** through Kafka, so slow embedding calls never block an
-  upload request. The event carries only the document id; the file itself stays in PostgreSQL
-  because Kafka messages are limited to about 1 MB by default.
+  upload request. The event is written to an outbox table in the same transaction as the document
+  and published afterwards, so an upload is kept even when Kafka is unreachable. The event carries
+  only the document id; the file itself stays in PostgreSQL because Kafka messages are limited to
+  about 1 MB by default.
 - **Optimistic locking** (`@Version`) on documents: if a document is deleted while it is being
   processed, the late status update fails instead of bringing the row back.
 - **API keys** are compared in constant time. The API is stateless, so CSRF protection is disabled.
+- **Ask rate limit** is a token bucket in this process, keyed by API key. It protects the chat
+  model from a noisy client; it is not a cluster-wide quota.
 
 ## Roadmap
 
-- Transactional outbox, so an upload event cannot get lost if Kafka is down at that moment
 - Hybrid search (full-text + vector) and re-ranking
 - Streaming answers via Server-Sent Events
 - Per-user document collections with JWT authentication
+- Cluster-wide rate limiting (Redis) if more than one app instance is used
 
 ## License
 
