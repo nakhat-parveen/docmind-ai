@@ -94,6 +94,12 @@ docmind:
   security:
     header-name: X-API-Key
     api-keys: ${DOCMIND_API_KEYS:local-dev-key}
+  rate-limit:
+    # 30 questions per minute per API key, with a burst of 30
+    enabled: true
+    capacity: 30
+    refill-tokens: 30
+    refill-period: 1m
 
 management:
   endpoints:

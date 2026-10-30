@@ -16,6 +16,9 @@ docmind:
     similarity-threshold: 0.05
   security:
     api-keys: test-key
+  rate-limit:
+    # other tests share a context and would trip a tight limit
+    enabled: false
 
 logging:
   level:
